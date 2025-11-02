@@ -2,7 +2,13 @@ import React from "react";
 import { MdOutlineOpenInNew } from "react-icons/md";
 import ColorSelector from "./ColorSelector";
 
-const WidgetBox = ({ widget, index, openInNewTab, removeWidget, renderWidget }) => {
+const WidgetBox = ({
+  widget,
+  index,
+  openInNewTab,
+  removeWidget,
+  renderWidget,
+}) => {
   return (
     <div className="h-full flex flex-col">
       {/* Widget Header */}
@@ -29,7 +35,7 @@ const WidgetBox = ({ widget, index, openInNewTab, removeWidget, renderWidget }) 
       </div>
 
       {/* Widget Content */}
-      <div className="flex-1 overflow-auto">{renderWidget(widget, index)}</div>
+      <div className="flex-1 overflow-auto">{renderWidget(widget)}</div>
     </div>
   );
 };

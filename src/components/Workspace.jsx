@@ -1,5 +1,16 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragOverlay,
+  useDraggable,
+  useDroppable,
+} from "@dnd-kit/core";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import {
   ChartWidget,
   StockPriceTable,
   StockDetails,
@@ -8,7 +19,6 @@ import {
 
 import { setCookie, getCookie } from "../utils/cookieUtils";
 import { FaSave } from "react-icons/fa";
-import ColorSelector from "./ColorSelector";
 import { useStock } from "../contexts/StockContext";
 import { MdOutlineOpenInNew } from "react-icons/md";
 import WidgetBox from "./WidgetBox";
@@ -21,7 +31,6 @@ const widgetComponents = {
 };
 
 const Workspace = ({ layout, onReset }) => {
-
   const { removeWidgetColor } = useStock();
 
   const [widgets, setWidgets] = useState(
@@ -29,8 +38,8 @@ const Workspace = ({ layout, onReset }) => {
       null
     )
   );
-  const [draggedWidget, setDraggedWidget] = useState(null);
-  const [dragOverIndex, setDragOverIndex] = useState(null);
+
+  const [activeId, setActiveId] = useState(null);
   const [contextMenu, setContextMenu] = useState({
     show: false,
     x: 0,
@@ -39,6 +48,14 @@ const Workspace = ({ layout, onReset }) => {
   });
   const contextMenuRef = useRef(null);
 
+  // Configure sensors for drag and drop
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // 8px movement required to start drag
+      },
+    })
+  );
 
   //#region layout save
   const saveLayout = async () => {
@@ -46,12 +63,12 @@ const Workspace = ({ layout, onReset }) => {
       layout,
       widgets, // Save the opened widgets in the layout
     };
-  
+
     console.log("Saving layout data:", layoutData); // Log the data being sent
-  
+
     // Save to cookies
     setCookie("savedLayout", layoutData);
-  
+
     // Save to MongoDB
     try {
       const response = await fetch("http://localhost:5000/api/save-layout", {
@@ -61,31 +78,31 @@ const Workspace = ({ layout, onReset }) => {
         },
         body: JSON.stringify(layoutData),
       });
-  
+
       if (response.ok) {
         alert("Layout saved successfully!");
       } else {
         alert("Failed to save layout to the database.");
       }
-    } catch (error) {
-        alert("Layout saved successfully!");
+    } catch {
+      alert("Layout saved successfully!");
     }
   };
 
   // Load layout from cookies on component mount
   useEffect(() => {
-    const savedLayout = getCookie('savedLayout');
+    const savedLayout = getCookie("savedLayout");
     if (savedLayout) {
       // Validate the saved layout matches our current layout structure
-      if (savedLayout.layout.rows === layout.rows && 
-          savedLayout.layout.cols === layout.cols &&
-          savedLayout.widgets.length === widgets.length) {
+      if (
+        savedLayout.layout.rows === layout.rows &&
+        savedLayout.layout.cols === layout.cols &&
+        savedLayout.widgets.length === widgets.length
+      ) {
         setWidgets(savedLayout.widgets);
       }
     }
   }, [layout, widgets.length]);
-
-
 
   //#region ctx menu logic
   useEffect(() => {
@@ -107,8 +124,8 @@ const Workspace = ({ layout, onReset }) => {
   const showContextMenu = (event, index) => {
     event.preventDefault();
 
-    if(widgets[index]) return;
-    
+    if (widgets[index]) return;
+
     setContextMenu({
       show: true,
       x: event.clientX,
@@ -130,121 +147,121 @@ const Workspace = ({ layout, onReset }) => {
 
   const removeWidget = (index) => {
     const newWidgets = [...widgets];
-    const widgetId = newWidgets[index]?.id; //get widgetId of the widget being removed
+    const widgetId = newWidgets[index]?.id;
     newWidgets[index] = null;
     setWidgets(newWidgets);
-  
+
     if (widgetId) {
-      removeWidgetColor(widgetId); // remove particular widget's color from context
+      removeWidgetColor(widgetId);
     }
   };
 
-  //region DND logic
-  const handleDragStart = (index) => {
-    if (widgets[index]) {
-      setDraggedWidget({ ...widgets[index], sourceIndex: index });
+  // DND Kit handlers
+  const handleDragStart = (event) => {
+    setActiveId(event.active.id);
+  };
+
+  const handleDragEnd = (event) => {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id) {
+      setActiveId(null);
+      return;
     }
-  };
 
-  const handleDragOver = (e, index) => {
-    e.preventDefault();
-    setDragOverIndex(index);
-  };
+    const activeIndex = parseInt(active.id.replace("cell-", ""));
+    const overIndex = parseInt(over.id.replace("cell-", ""));
 
-  const handleDrop = (index) => {
-    if (draggedWidget && draggedWidget.sourceIndex !== index) {
+    if (widgets[activeIndex]) {
       const newWidgets = [...widgets];
-  
       // Swap widgets
-      const sourceWidget = newWidgets[draggedWidget.sourceIndex];
-      const targetWidget = newWidgets[index];
-  
-      newWidgets[draggedWidget.sourceIndex] = targetWidget;
-      newWidgets[index] = sourceWidget;
-  
+      const temp = newWidgets[activeIndex];
+      newWidgets[activeIndex] = newWidgets[overIndex];
+      newWidgets[overIndex] = temp;
       setWidgets(newWidgets);
-  
-      // Swap colors in StockContext
-      // if (sourceWidget && targetWidget) {
-      //   const sourceWidgetId = sourceWidget.id;
-      //   const targetWidgetId = targetWidget.id;
-  
-      //   const sourceColor = widgetColors[sourceWidgetId];
-      //   const targetColor = widgetColors[targetWidgetId];
-  
-      //   updateWidgetColor(sourceWidgetId, targetColor);
-      //   updateWidgetColor(targetWidgetId, sourceColor);
-      // }
     }
-    setDraggedWidget(null);
-    setDragOverIndex(null);
+
+    setActiveId(null);
+  };
+
+  const handleDragCancel = () => {
+    setActiveId(null);
   };
 
   //#region wdgt renderer
-  const renderWidget = (widget, index) => {
+  const renderWidget = (widget) => {
     const Component = widgetComponents[widget.type].component;
     return (
-      <div
-        draggable
-        onDragStart={() => handleDragStart(index)}
-        className="h-full"
-      >
+      <div className="h-full">
         <Component widgetId={widget.id} />
       </div>
     );
   };
 
-
   //#region new tab logic
   const openInNewTab = (widget) => {
     const url = `/widget?type=${widget.type}&id=${widget.id}`;
-    const width = 500; // Set the width of the new window
-    const height = 500; // Set the height of the new window
-    const left = window.screenX + (window.outerWidth - width) / 2; // Center horizontally
-    const top = window.screenY + (window.outerHeight - height) / 2; // Center vertically
-  
+    const width = 500;
+    const height = 500;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+
     const newWindow = window.open(
       url,
       "_blank",
       `width=${width},height=${height},top=${top},left=${left},resizable,scrollbars`
     );
-  
+
     if (!newWindow) {
       alert("Popup blocked! Please allow popups for this website.");
     }
   };
-  
 
-  //#region mtx grd renderer
-  const renderGridCell = (index, span = null) => {
+  // Droppable Cell Component
+  const DroppableCell = ({ id, index, widget }) => {
+    const { setNodeRef, isOver } = useDroppable({ id });
+    const {
+      attributes,
+      listeners,
+      setNodeRef: setDragRef,
+      transform,
+      isDragging,
+    } = useDraggable({
+      id,
+      disabled: !widget,
+    });
+
+    const style = transform
+      ? {
+          transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+          opacity: isDragging ? 0.5 : 1,
+        }
+      : {};
+
     return (
       <div
-        key={index}
+        ref={setNodeRef}
         className={`bg-gray-800 rounded-lg border ${
-          dragOverIndex === index
-            ? "border-yellow-500 bg-gray-700"
-            : "border-gray-700"
-        } relative overflow-hidden`}
-        style={
-          span
-            ? {
-                gridColumn: `${span.col + 1} / span ${span.colSpan}`,
-                gridRow: `${span.row + 1} / span ${span.rowSpan}`,
-              }
-            : {}
-        }
+          isOver ? "border-yellow-500 bg-gray-700" : "border-gray-700"
+        } relative overflow-hidden h-full`}
         onContextMenu={(e) => showContextMenu(e, index)}
-        onDragOver={(e) => handleDragOver(e, index)}
-        onDrop={() => handleDrop(index)}
       >
-        {widgets[index] ? (
-          <WidgetBox
-            widget={widgets[index]}
-            index={index}
-            openInNewTab={openInNewTab}
-            removeWidget={removeWidget}
-            renderWidget={renderWidget}
-          />
+        {widget ? (
+          <div
+            ref={setDragRef}
+            style={style}
+            {...attributes}
+            {...listeners}
+            className="h-full"
+          >
+            <WidgetBox
+              widget={widget}
+              index={index}
+              openInNewTab={openInNewTab}
+              removeWidget={removeWidget}
+              renderWidget={renderWidget}
+            />
+          </div>
         ) : (
           <button
             onClick={(e) => showContextMenu(e, index)}
@@ -257,35 +274,130 @@ const Workspace = ({ layout, onReset }) => {
     );
   };
 
-  //#region spn grd renderer
+  //#region grd renderer with resizable panels
   const renderGrid = () => {
-    if (layout.spans) {
+    // For matrix layouts (rows x cols), use PanelGroup with nested rows
+    if (!layout.spans) {
+      // Create rows
+      const rows = [];
+      for (let r = 0; r < layout.rows; r++) {
+        const colsInRow = [];
+        for (let c = 0; c < layout.cols; c++) {
+          const index = r * layout.cols + c;
+          colsInRow.push(
+            <Panel
+              key={`cell-${index}`}
+              defaultSize={100 / layout.cols}
+              minSize={10}
+            >
+              <DroppableCell
+                id={`cell-${index}`}
+                index={index}
+                widget={widgets[index]}
+              />
+            </Panel>
+          );
+          if (c < layout.cols - 1) {
+            colsInRow.push(
+              <PanelResizeHandle
+                key={`resize-h-${r}-${c}`}
+                className="w-1 bg-gray-700 hover:bg-yellow-500 transition-colors"
+              />
+            );
+          }
+        }
+
+        rows.push(
+          <Panel key={`row-${r}`} defaultSize={100 / layout.rows} minSize={10}>
+            <PanelGroup direction="horizontal">{colsInRow}</PanelGroup>
+          </Panel>
+        );
+
+        if (r < layout.rows - 1) {
+          rows.push(
+            <PanelResizeHandle
+              key={`resize-v-${r}`}
+              className="h-1 bg-gray-700 hover:bg-yellow-500 transition-colors"
+            />
+          );
+        }
+      }
+
       return (
-        <div
-          className="grid h-full gap-2"
-          style={{
-            gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
-            gridTemplateRows: `repeat(${layout.rows}, 1fr)`,
-          }}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
         >
-          {layout.spans.map((span, index) => renderGridCell(index, span))}
-        </div>
-      );
-    } else {
-      return (
-        <div
-          className="grid h-full gap-2"
-          style={{
-            gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
-            gridTemplateRows: `repeat(${layout.rows}, 1fr)`,
-          }}
-        >
-          {Array.from({ length: layout.rows * layout.cols }).map((_, index) =>
-            renderGridCell(index)
-          )}
-        </div>
+          <PanelGroup direction="vertical" className="h-full">
+            {rows}
+          </PanelGroup>
+          <DragOverlay>
+            {activeId && widgets[parseInt(activeId.replace("cell-", ""))] ? (
+              <div className="bg-gray-800 rounded-lg border border-yellow-500 opacity-80">
+                <WidgetBox
+                  widget={widgets[parseInt(activeId.replace("cell-", ""))]}
+                  index={parseInt(activeId.replace("cell-", ""))}
+                  openInNewTab={openInNewTab}
+                  removeWidget={removeWidget}
+                  renderWidget={renderWidget}
+                />
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       );
     }
+
+    // For span-based layouts, fall back to CSS grid (panels don't support arbitrary spans easily)
+    return (
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
+        <div
+          className="grid h-full gap-2"
+          style={{
+            gridTemplateColumns: `repeat(${layout.cols}, 1fr)`,
+            gridTemplateRows: `repeat(${layout.rows}, 1fr)`,
+          }}
+        >
+          {layout.spans.map((span, index) => (
+            <div
+              key={`cell-${index}`}
+              style={{
+                gridColumn: `${span.col + 1} / span ${span.colSpan}`,
+                gridRow: `${span.row + 1} / span ${span.rowSpan}`,
+              }}
+            >
+              <DroppableCell
+                id={`cell-${index}`}
+                index={index}
+                widget={widgets[index]}
+              />
+            </div>
+          ))}
+        </div>
+        <DragOverlay>
+          {activeId && widgets[parseInt(activeId.replace("cell-", ""))] ? (
+            <div className="bg-gray-800 rounded-lg border border-yellow-500 opacity-80">
+              <WidgetBox
+                widget={widgets[parseInt(activeId.replace("cell-", ""))]}
+                index={parseInt(activeId.replace("cell-", ""))}
+                openInNewTab={openInNewTab}
+                removeWidget={removeWidget}
+                renderWidget={renderWidget}
+              />
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
+    );
   };
 
   //#region workspace
@@ -293,7 +405,6 @@ const Workspace = ({ layout, onReset }) => {
     <div className="w-full h-screen flex flex-col bg-gray-900">
       {/* Fixed height header */}
       <div className="flex justify-between items-center p-4 border-b border-gray-700">
-     
         <button
           className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded transition-colors"
           onClick={onReset}
@@ -301,24 +412,23 @@ const Workspace = ({ layout, onReset }) => {
           ← Back to Layouts
         </button>
         <div className="flex items-center space-x-10">
-        <button
+          <button
             className="bg-blue-500 px-1 py-1 rounded hover:bg-blue-600 transition-all duration-100"
             onClick={saveLayout}
           >
-           <FaSave className="inline mr-1" size={20} color="lightBlue" />  Save Layout
+            <FaSave className="inline mr-1" size={20} color="lightBlue" /> Save
+            Layout
           </button>
-        <h2 className="text-xl font-semibold">
-          {layout.id?.includes("span")
-            ? layout.id.replace(/-/g, " ")
-            : `${layout.rows}x${layout.cols} Workspace`}
-        </h2>
+          <h2 className="text-xl font-semibold">
+            {layout.id?.includes("span")
+              ? layout.id.replace(/-/g, " ")
+              : `${layout.rows}x${layout.cols} Workspace`}
+          </h2>
         </div>
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 overflow-hidden p-2">
-        {renderGrid()}
-      </div>
+      <div className="flex-1 overflow-hidden p-2">{renderGrid()}</div>
 
       {/* Context Menu */}
       {contextMenu.show && (
