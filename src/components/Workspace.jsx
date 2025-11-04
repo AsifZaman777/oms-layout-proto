@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   DndContext,
   closestCenter,
@@ -29,6 +29,70 @@ const widgetComponents = {
   details: { component: StockDetails, name: "Stock Details" },
   depth: { component: MarketDepth, name: "Market Depth" },
 };
+
+// Extracted and memoized DroppableCell to prevent re-renders
+const DroppableCell = React.memo(function DroppableCell({
+  id,
+  index,
+  widget,
+  showContextMenu,
+  openInNewTab,
+  removeWidget,
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id });
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDragRef,
+    transform,
+    isDragging,
+  } = useDraggable({
+    id,
+    disabled: !widget,
+  });
+
+  const style = transform
+    ? {
+        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+        opacity: isDragging ? 0.5 : 1,
+      }
+    : {};
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`bg-gray-800 rounded-lg border ${
+        isOver ? "border-yellow-500 bg-gray-700" : "border-gray-700"
+      } relative overflow-hidden h-full`}
+      onContextMenu={(e) => showContextMenu(e, index)}
+    >
+      {widget ? (
+        <div
+          ref={setDragRef}
+          style={style}
+          {...attributes}
+          {...listeners}
+          className="h-full"
+        >
+          <WidgetBox
+            widget={widget}
+            index={index}
+            openInNewTab={openInNewTab}
+            removeWidget={removeWidget}
+            Component={widgetComponents[widget.type].component}
+          />
+        </div>
+      ) : (
+        <button
+          onClick={(e) => showContextMenu(e, index)}
+          className="w-full h-full flex items-center justify-center text-yellow-400 hover:text-yellow-300 border-2 border-dashed border-yellow-600 hover:border-yellow-500 rounded transition-all"
+        >
+          + Add Widget
+        </button>
+      )}
+    </div>
+  );
+});
 
 const Workspace = ({ layout, onReset }) => {
   const { removeWidgetColor } = useStock();
@@ -121,18 +185,21 @@ const Workspace = ({ layout, onReset }) => {
     };
   }, [contextMenu]);
 
-  const showContextMenu = (event, index) => {
-    event.preventDefault();
+  const showContextMenu = useCallback(
+    (event, index) => {
+      event.preventDefault();
 
-    if (widgets[index]) return;
+      if (widgets[index]) return;
 
-    setContextMenu({
-      show: true,
-      x: event.clientX,
-      y: event.clientY,
-      cellIndex: index,
-    });
-  };
+      setContextMenu({
+        show: true,
+        x: event.clientX,
+        y: event.clientY,
+        cellIndex: index,
+      });
+    },
+    [widgets]
+  );
 
   //#region widget mangmnt
   const addWidget = (type) => {
@@ -145,16 +212,21 @@ const Workspace = ({ layout, onReset }) => {
     setContextMenu({ ...contextMenu, show: false });
   };
 
-  const removeWidget = (index) => {
-    const newWidgets = [...widgets];
-    const widgetId = newWidgets[index]?.id;
-    newWidgets[index] = null;
-    setWidgets(newWidgets);
-
-    if (widgetId) {
-      removeWidgetColor(widgetId);
-    }
-  };
+  const removeWidget = useCallback(
+    (index) => {
+      let removedId = null;
+      setWidgets((prev) => {
+        const newWidgets = [...prev];
+        removedId = newWidgets[index]?.id || null;
+        newWidgets[index] = null;
+        return newWidgets;
+      });
+      if (removedId) {
+        removeWidgetColor(removedId);
+      }
+    },
+    [removeWidgetColor]
+  );
 
   // DND Kit handlers
   const handleDragStart = (event) => {
@@ -188,18 +260,8 @@ const Workspace = ({ layout, onReset }) => {
     setActiveId(null);
   };
 
-  //#region wdgt renderer
-  const renderWidget = (widget) => {
-    const Component = widgetComponents[widget.type].component;
-    return (
-      <div className="h-full">
-        <Component widgetId={widget.id} />
-      </div>
-    );
-  };
-
   //#region new tab logic
-  const openInNewTab = (widget) => {
+  const openInNewTab = useCallback((widget) => {
     const url = `/widget?type=${widget.type}&id=${widget.id}`;
     const width = 500;
     const height = 500;
@@ -215,64 +277,7 @@ const Workspace = ({ layout, onReset }) => {
     if (!newWindow) {
       alert("Popup blocked! Please allow popups for this website.");
     }
-  };
-
-  // Droppable Cell Component
-  const DroppableCell = ({ id, index, widget }) => {
-    const { setNodeRef, isOver } = useDroppable({ id });
-    const {
-      attributes,
-      listeners,
-      setNodeRef: setDragRef,
-      transform,
-      isDragging,
-    } = useDraggable({
-      id,
-      disabled: !widget,
-    });
-
-    const style = transform
-      ? {
-          transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-          opacity: isDragging ? 0.5 : 1,
-        }
-      : {};
-
-    return (
-      <div
-        ref={setNodeRef}
-        className={`bg-gray-800 rounded-lg border ${
-          isOver ? "border-yellow-500 bg-gray-700" : "border-gray-700"
-        } relative overflow-hidden h-full`}
-        onContextMenu={(e) => showContextMenu(e, index)}
-      >
-        {widget ? (
-          <div
-            ref={setDragRef}
-            style={style}
-            {...attributes}
-            {...listeners}
-            className="h-full"
-          >
-            <WidgetBox
-              widget={widget}
-              index={index}
-              openInNewTab={openInNewTab}
-              removeWidget={removeWidget}
-              renderWidget={renderWidget}
-            />
-          </div>
-        ) : (
-          <button
-            onClick={(e) => showContextMenu(e, index)}
-            className="w-full h-full flex items-center justify-center text-yellow-400 hover:text-yellow-300 border-2 border-dashed border-yellow-600 hover:border-yellow-500 rounded transition-all"
-          >
-            + Add Widget
-          </button>
-        )}
-      </div>
-    );
-  };
+  }, []);
 
   //#region grd renderer with resizable panels
   const renderGrid = () => {
@@ -294,6 +299,9 @@ const Workspace = ({ layout, onReset }) => {
                 id={`cell-${index}`}
                 index={index}
                 widget={widgets[index]}
+                showContextMenu={showContextMenu}
+                openInNewTab={openInNewTab}
+                removeWidget={removeWidget}
               />
             </Panel>
           );
@@ -342,7 +350,11 @@ const Workspace = ({ layout, onReset }) => {
                   index={parseInt(activeId.replace("cell-", ""))}
                   openInNewTab={openInNewTab}
                   removeWidget={removeWidget}
-                  renderWidget={renderWidget}
+                  Component={
+                    widgetComponents[
+                      widgets[parseInt(activeId.replace("cell-", ""))].type
+                    ].component
+                  }
                 />
               </div>
             ) : null}
@@ -379,6 +391,9 @@ const Workspace = ({ layout, onReset }) => {
                 id={`cell-${index}`}
                 index={index}
                 widget={widgets[index]}
+                showContextMenu={showContextMenu}
+                openInNewTab={openInNewTab}
+                removeWidget={removeWidget}
               />
             </div>
           ))}
@@ -391,7 +406,11 @@ const Workspace = ({ layout, onReset }) => {
                 index={parseInt(activeId.replace("cell-", ""))}
                 openInNewTab={openInNewTab}
                 removeWidget={removeWidget}
-                renderWidget={renderWidget}
+                Component={
+                  widgetComponents[
+                    widgets[parseInt(activeId.replace("cell-", ""))].type
+                  ].component
+                }
               />
             </div>
           ) : null}

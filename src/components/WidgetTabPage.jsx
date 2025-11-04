@@ -1,5 +1,4 @@
 import React from "react";
-import { useSearchParams } from "react-router-dom"; // Or `useRouter` in Next.js
 import {
   ChartWidget,
   StockPriceTable,
@@ -26,7 +25,6 @@ const WidgetTabPage = () => {
   // Mock functions for WidgetBox props
   const openInNewTab = () => alert("Already in a new tab!");
   const removeWidget = () => alert("Cannot remove widget in this tab!");
-  const renderWidget = (widget) => <Component widgetId={widget.id} />;
 
   // Mock widget data
   const widget = { id, type };
@@ -40,7 +38,7 @@ const WidgetTabPage = () => {
           index={0} // Index is not relevant here, so we use 0
           openInNewTab={openInNewTab}
           removeWidget={removeWidget}
-          renderWidget={renderWidget}
+          Component={Component}
         />
       </div>
     </div>

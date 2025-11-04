@@ -2,13 +2,14 @@ import React from "react";
 import { MdOutlineOpenInNew } from "react-icons/md";
 import ColorSelector from "./ColorSelector";
 
-const WidgetBox = ({
+// Memoized to avoid unnecessary re-renders when parent state changes
+const WidgetBox = React.memo(function WidgetBox({
   widget,
   index,
   openInNewTab,
   removeWidget,
-  renderWidget,
-}) => {
+  Component,
+}) {
   return (
     <div className="h-full flex flex-col">
       {/* Widget Header */}
@@ -35,9 +36,11 @@ const WidgetBox = ({
       </div>
 
       {/* Widget Content */}
-      <div className="flex-1 overflow-auto">{renderWidget(widget)}</div>
+      <div className="flex-1 overflow-auto">
+        {Component ? <Component widgetId={widget.id} /> : null}
+      </div>
     </div>
   );
-};
+});
 
 export default WidgetBox;
